@@ -1,0 +1,3 @@
+[submodule "CoreAudioML"]
+	path = CoreAudioML
+	url = https://github.com/Alec-Wright/CoreAudioML
