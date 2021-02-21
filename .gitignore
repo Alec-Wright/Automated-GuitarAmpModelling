@@ -1,3 +1,4 @@
+runs
 .idea/
 .DS_Store
 applet
@@ -9,3 +10,19 @@ application.windows32
 application.windows64
 application.macosx
 out
+Configs/*
+!Configs/.gitkeep
+Data/*
+!Data/test/ht1-input.wav
+!Data/test/ht1-target.wav
+!Data/train/ht1-input.wav
+!Data/train/ht1-target.wav
+!Data/val/ht1-input.wav
+!Data/val/ht1-target.wav
+!Data/train/muff-input.wav
+!Data/train/muff-target.wav
+!Data/test/muff-input.wav
+!Data/test/muff-target.wav
+!Data/val/muff-input.wav
+!Data/val/muff-target.wav
+
