@@ -245,3 +245,5 @@ if __name__ == "__main__":
         f.write(str(test_loss))
     write(os.path.join(save_path, "test_out_bestv.wav"),
           dataset.subsets['test'].fs, test_output.cpu().numpy()[:, 0, 0])
+    with open(os.path.join(save_path, 'maxmemusage.txt'), 'w') as f:
+        f.write(str(torch.cuda.max_memory_allocated()))
