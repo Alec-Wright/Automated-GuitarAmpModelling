@@ -15,7 +15,7 @@ def parse_args():
                         help='file name/location of audio file to be processed')
     parser.add_argument('output_file', default='output.wav', nargs='?',
                         help='file name/location where processed audio will be saved')
-    parser.add_argument('model_file', default='Results/ht1ht11/model_best.json', nargs='?',
+    parser.add_argument('model_file', default='Results/ht1-ht11/model_best.json', nargs='?',
                         help='file name/location of .json file that contains the neural network model')
     return parser.parse_args()
 
@@ -31,10 +31,8 @@ def proc_audio(args):
 
 
 def main():
-    st = time.time()
     args = parse_args()
     proc_audio(args)
-    print(time.time() - st)
 
 if __name__ == '__main__':
     main()
