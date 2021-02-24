@@ -1,4 +1,9 @@
-Results/*/*.wav
+*DS_Store
+Results/*/*
+!Results/*/bestvloss.txt
+!Results/*/model_best.json
+!Results/*/model.json
+!Results/*/testloss_final.txt
 *.sh
 slurm*
 runs
