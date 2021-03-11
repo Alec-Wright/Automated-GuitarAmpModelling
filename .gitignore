@@ -20,8 +20,9 @@ application.macosx
 out
 Configs/*
 !Configs/.gitkeep
-!Configs/ht11.json
-!Configs/muff1.json
+!Configs/RNN1.json
+!Configs/RNN2.json
+!Configs/RNN3.json
 Data/*
 !Data/test/ht1-input.wav
 !Data/test/ht1-target.wav

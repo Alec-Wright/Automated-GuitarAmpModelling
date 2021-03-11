@@ -1,0 +1,1 @@
+{"hidden_size": 16, "unit_type": "GRU", "loss_fcns": {"ESR": 0.75, "DC": 0.25}, "pre_filt": "None", "device": "ht1", "file_name": "ht1"}
