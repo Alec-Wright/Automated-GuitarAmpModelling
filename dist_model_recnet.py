@@ -3,12 +3,14 @@ import CoreAudioML.training as training
 import CoreAudioML.dataset as dataset
 import CoreAudioML.networks as networks
 import torch
+import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 import argparse
 import time
 import os
-import math
+import csv
 from scipy.io.wavfile import write
+
 
 prsr = argparse.ArgumentParser(
     description='''This script implements training for neural network amplifier/distortion effects modelling. This is
@@ -23,7 +25,7 @@ prsr.add_argument('--file_name', '-fn', default='ht1',
                        'with the filename and the extensions -input.wav and -target.wav ')
 prsr.add_argument('--load_config', '-l',
                   help="File path, to a JSON config file, arguments listed in the config file will replace the defaults"
-                  , default='')
+                  , default='RNN3')
 prsr.add_argument('--config_location', '-cl', default='Configs', help='Location of the "Configs" directory')
 prsr.add_argument('--save_location', '-sloc', default='Results', help='Directory where trained models will be saved')
 prsr.add_argument('--load_model', '-lm', default=True, help='load a pretrained model if it is found')
@@ -32,18 +34,18 @@ prsr.add_argument('--load_model', '-lm', default=True, help='load a pretrained m
 prsr.add_argument('--segment_length', '-slen', type=int, default=22050, help='Training audio segment length in samples')
 
 # number of epochs and validation
-prsr.add_argument('--epochs', '-eps', type=int, default=4, help='Max number of training epochs to run')
+prsr.add_argument('--epochs', '-eps', type=int, default=2000, help='Max number of training epochs to run')
 prsr.add_argument('--validation_f', '-vfr', type=int, default=2, help='Validation Frequency (in epochs)')
 # TO DO
-#prsr.add_argument('--validation_p', '-vp', type=int, default=0,
-#                  help='How many validations without improvement before stopping training, None for no early stopping')
+prsr.add_argument('--validation_p', '-vp', type=int, default=25,
+                  help='How many validations without improvement before stopping training, None for no early stopping')
 
 # settings for the training epoch
 prsr.add_argument('--batch_size', '-bs', type=int, default=50, help='Training mini-batch size')
 prsr.add_argument('--iter_num', '-it', type=int, default=None,
                   help='Overrides --batch_size and instead sets the batch_size so that a total of --iter_num batches'
                        'are processed in each epoch')
-prsr.add_argument('--learn_rate', '-lr', type=float, default=0.0005, help='Initial learning rate')
+prsr.add_argument('--learn_rate', '-lr', type=float, default=0.005, help='Initial learning rate')
 prsr.add_argument('--init_len', '-il', type=int, default=200,
                   help='Number of sequence samples to process before starting weight updates')
 prsr.add_argument('--up_fr', '-uf', type=int, default=1000,
@@ -52,11 +54,11 @@ prsr.add_argument('--up_fr', '-uf', type=int, default=1000,
 prsr.add_argument('--cuda', '-cu', default=1, help='Use GPU if available')
 
 # loss function/s
-prsr.add_argument('--loss_fcns', '-lf', default={'ESRPre': 0.5, 'DC': 0.5},
+prsr.add_argument('--loss_fcns', '-lf', default={'ESRPre': 0.75, 'DC': 0.25},
                   help='Which loss functions, ESR, ESRPre, DC. Argument is a dictionary with each key representing a'
                        'loss function name and the corresponding value being the multiplication factor applied to that'
                        'loss function, used to control the contribution of each loss function to the overall loss ')
-prsr.add_argument('--pre_filt',   '-pc',   default=[1, -0.85],
+prsr.add_argument('--pre_filt',   '-pf',   default='high_pass',
                     help='FIR filter coefficients for pre-emphasis filter, can also read in a csv file')
 
 # the validation and test sets are divided into shorter chunks before processing to reduce the amount of GPU memory used
@@ -67,6 +69,7 @@ prsr.add_argument('--test_chunk', '-tc', type=int, default=100000, help='Number 
                                                                                'in each chunk of validation ')
 
 # arguments for the network structure
+prsr.add_argument('--model', '-m', default='SimpleRNN', type=str, help='model architecture')
 prsr.add_argument('--input_size', '-is', default=1, type=int, help='1 for mono input data, 2 for stereo, etc ')
 prsr.add_argument('--output_size', '-os', default=1, type=int, help='1 for mono output data, 2 for stereo, etc ')
 prsr.add_argument('--num_blocks', '-nb', default=1, type=int, help='Number of recurrent blocks')
@@ -75,65 +78,6 @@ prsr.add_argument('--unit_type', '-ut', default='LSTM', help='LSTM or GRU or RNN
 prsr.add_argument('--skip_con', '-sc', default=1, help='is there a skip connection for the input to the output')
 
 args = prsr.parse_args()
-
-
-# train_epoch runs one epoch of training
-def train_epoch(input_data, target_data, nnet, loss_fcn, optim, bs, init_len, up_fr):
-    # shuffle the segments at the start of the epoch
-    shuffle = torch.randperm(input_data.shape[1])
-
-    # Iterate over the batches
-    ep_loss = 0
-    for batch_i in range(math.ceil(shuffle.shape[0] / bs)):
-        # Load batch of shuffled segments
-        input_batch = input_data[:, shuffle[batch_i * bs:(batch_i + 1) * bs], :]
-        target_batch = target_data[:, shuffle[batch_i * bs:(batch_i + 1) * bs], :]
-
-        # Initialise network hidden state by processing some samples then zero the gradient buffers
-        nnet(input_batch[0:init_len, :, :])
-        nnet.zero_grad()
-
-        # Choose the starting index for processing the rest of the batch sequence, in chunks of args.up_fr
-        start_i = init_len
-        batch_loss = 0
-        # Iterate over the remaining samples in the mini batch
-        for k in range(math.ceil((input_batch.shape[0] - init_len) / up_fr)):
-            # Process input batch with neural network
-            output = nnet(input_batch[start_i:start_i + up_fr, :, :])
-
-            # Calculate loss and update network parameters
-            loss = loss_fcn(output, target_batch[start_i:start_i + args.up_fr, :, :])
-            loss.backward()
-            optim.step()
-
-            # Set the network hidden state, to detach it from the computation graph
-            nnet.detach_hidden()
-            nnet.zero_grad()
-
-            # Update the start index for the next iteration and add the loss to the batch_loss total
-            start_i += args.up_fr
-            batch_loss += loss.item()
-
-        # Add the average batch loss to the epoch loss and reset the hidden states to zeros
-        ep_loss += batch_loss / (k + 1)
-        nnet.reset_hidden()
-
-    return ep_loss / (batch_i + 1)
-
-
-# only proc processes a dataset but does no gradient tracking or parameter updates, used for finding test/val loss
-def only_proc(input_data, target_data, nnet, loss_fcn, chunk):
-    with torch.no_grad():
-        output = torch.empty_like(target_data)
-        for l in range(int(output.size()[0] / chunk)):
-            output[l * chunk:(l + 1) * chunk] = nnet(input_data[l * chunk:(l + 1) * chunk])
-            nnet.detach_hidden()
-        # If the data set doesn't divide evenly into the chunk length, process the remainder
-        if not (output.size()[0] / chunk).is_integer():
-            output[(l + 1) * args.val_chunk:-1] = nnet(input_data[(l + 1) * chunk:-1])
-        nnet.reset_hidden()
-        loss = loss_fcn(output, target_data)
-    return output, loss.item()
 
 # This function takes a directory as argument, looks for an existing model file called 'model.json' and loads a network
 # from it, after checking the network in 'model.json' matches the architecture described in args. If no model file is
@@ -172,6 +116,20 @@ if __name__ == "__main__":
         for parameters in configs:
             args.__setattr__(parameters, configs[parameters])
 
+    if args.model == 'SimpleRNN':
+        model_name = args.model + '_' + args.unit_type + '_hs' + str(args.hidden_size) + '_pre_' + args.pre_filt
+    if args.pre_filt == 'A-Weighting':
+        with open('Configs/' + 'b_Awght_mk2.csv') as csvfile:
+            reader = csv.reader(csvfile, delimiter=',')
+            args.pre_filt = list(reader)
+            args.pre_filt = args.pre_filt[0]
+            for item in range(len(args.pre_filt)):
+                args.pre_filt[item] = float(args.pre_filt[item])
+    elif args.pre_filt == 'high_pass':
+        args.pre_filt = [-0.85, 1]
+    elif args.pre_filt == 'None':
+        args.pre_filt = None
+
     # Generate name of directory where results will be saved
     save_path = os.path.join(args.save_location, args.device + '-' + args.load_config)
 
@@ -189,10 +147,14 @@ if __name__ == "__main__":
         network = network.cuda()
         cuda = 1
 
+    # Set up training optimiser + scheduler + loss fcns and training info tracker
     optimiser = torch.optim.Adam(network.parameters(), lr=args.learn_rate)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimiser, 'min', factor=0.5)
     loss_functions = training.LossWrapper(args.loss_fcns, args.pre_filt)
     train_track = training.TrainTrack()
+    writer = SummaryWriter(os.path.join('runs', model_name))
 
+    # Load dataset
     dataset = dataset.DataSet(data_dir='Data')
 
     dataset.create_subset('train', frame_len=22050)
@@ -204,31 +166,36 @@ if __name__ == "__main__":
     dataset.create_subset('test')
     dataset.load_file(os.path.join('test', args.file_name), 'test')
 
-    writer = SummaryWriter()
+
     # If training is restarting, this will ensure the previously elapsed training time is added to the total
     init_time = time.time() - start_time + train_track['total_time']*3600
     # Set network save_state flag to true, so when the save_model method is called the network weights are saved
     network.save_state = True
+    patience_counter = 0
 
     # This is where training happens
     # the network records the last epoch number, so if training is restarted it will start at the correct epoch number
     for epoch in range(train_track['current_epoch'] + 1, args.epochs + 1):
         ep_st_time = time.time()
+        print('current learning rate: ' + str(optimiser.param_groups[0]['lr']))
 
         # Run 1 epoch of training,
-        epoch_loss = train_epoch(dataset.subsets['train'].data['input'][0], dataset.subsets['train'].data['target'][0],
-                                 network, loss_functions, optimiser, args.batch_size, args.init_len, args.up_fr)
+        epoch_loss = network.train_epoch(dataset.subsets['train'].data['input'][0],
+                                         dataset.subsets['train'].data['target'][0],
+                                         loss_functions, optimiser, args.batch_size, args.init_len, args.up_fr)
 
         # Run validation
         if epoch % args.validation_f == 0:
             val_ep_st_time = time.time()
-            val_output, val_loss = only_proc(dataset.subsets['val'].data['input'][0],
-                                             dataset.subsets['val'].data['target'][0],
-                                             network, loss_functions, args.val_chunk)
+            val_output, val_loss = network.process_data(dataset.subsets['val'].data['input'][0],
+                                             dataset.subsets['val'].data['target'][0], loss_functions, args.val_chunk)
+            scheduler.step(val_loss)
             if val_loss < train_track['best_val_loss']:
                 network.save_model('model_best', save_path)
                 write(os.path.join(save_path, "best_val_out.wav"),
                       dataset.subsets['test'].fs, val_output.cpu().numpy()[:, 0, 0])
+            else:
+                patience_counter += 1
             train_track.val_epoch_update(val_loss, val_ep_st_time, time.time())
             writer.add_scalar('Loss/val', train_track['validation_losses'][-1], epoch)
 
@@ -238,21 +205,26 @@ if __name__ == "__main__":
         network.save_model('model', save_path)
         miscfuncs.json_save(train_track, 'training_stats', save_path)
 
-    test_output, test_loss = only_proc(dataset.subsets['test'].data['input'][0],
-                                     dataset.subsets['test'].data['target'][0],
-                                     network, loss_functions, args.test_chunk)
-    write(os.path.join(save_path, "test_out_final.wav"),
-          dataset.subsets['test'].fs, test_output.cpu().numpy()[:, 0, 0])
+        if args.validation_p and patience_counter > args.validation_p:
+            print('validation patience limit reached at epoch ' + str(epoch))
+            break
+
+    test_output, test_loss = network.process_data(dataset.subsets['test'].data['input'][0],
+                                     dataset.subsets['test'].data['target'][0], loss_functions, args.test_chunk)
+    write(os.path.join(save_path, "test_out_final.wav"), dataset.subsets['test'].fs, test_output.cpu().numpy()[:, 0, 0])
+    writer.add_scalar('Loss/test_loss', test_loss.item(), 1)
 
     best_val_net = miscfuncs.json_load('model_best', save_path)
     network = networks.load_model(best_val_net)
-    test_output, test_loss = only_proc(dataset.subsets['test'].data['input'][0],
-                                     dataset.subsets['test'].data['target'][0],
-                                     network, loss_functions, args.test_chunk)
+    test_output, test_loss = network.process_data(dataset.subsets['test'].data['input'][0],
+                                     dataset.subsets['test'].data['target'][0], loss_functions, args.test_chunk)
     write(os.path.join(save_path, "test_out_bestv.wav"),
           dataset.subsets['test'].fs, test_output.cpu().numpy()[:, 0, 0])
+    writer.add_scalar('Loss/test_loss', test_loss.item(), 2)
+
+    train_track['test_loss'] = test_loss.item()
+    miscfuncs.json_save(train_track, 'training_stats', save_path)
     if cuda:
         with open(os.path.join(save_path, 'maxmemusage.txt'), 'w') as f:
             f.write(str(torch.cuda.max_memory_allocated()))
-    train_track['test_loss'] = test_loss
-    miscfuncs.json_save(train_track, 'training_stats', save_path)
+
