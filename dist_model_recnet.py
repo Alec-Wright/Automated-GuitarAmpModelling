@@ -196,10 +196,10 @@ if __name__ == "__main__":
                       dataset.subsets['test'].fs, val_output.cpu().numpy()[:, 0, 0])
             else:
                 patience_counter += 1
-            train_track.val_epoch_update(val_loss, val_ep_st_time, time.time())
+            train_track.val_epoch_update(val_loss.item(), val_ep_st_time, time.time())
             writer.add_scalar('Loss/val', train_track['validation_losses'][-1], epoch)
 
-        train_track.train_epoch_update(epoch_loss, ep_st_time, time.time(), init_time, epoch)
+        train_track.train_epoch_update(epoch_loss.item(), ep_st_time, time.time(), init_time, epoch)
         # write loss to the tensorboard (just for recording purposes)
         writer.add_scalar('Loss/train', train_track['training_losses'][-1], epoch)
         network.save_model('model', save_path)
