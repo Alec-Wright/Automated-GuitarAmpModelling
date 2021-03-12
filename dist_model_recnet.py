@@ -117,7 +117,7 @@ if __name__ == "__main__":
             args.__setattr__(parameters, configs[parameters])
 
     if args.model == 'SimpleRNN':
-        model_name = args.model + '_' + args.unit_type + '_hs' + str(args.hidden_size) + '_pre_' + args.pre_filt
+        model_name = args.model + args.device + '_' + args.unit_type + '_hs' + str(args.hidden_size) + '_pre_' + args.pre_filt
     if args.pre_filt == 'A-Weighting':
         with open('Configs/' + 'b_Awght_mk2.csv') as csvfile:
             reader = csv.reader(csvfile, delimiter=',')
@@ -148,11 +148,11 @@ if __name__ == "__main__":
         cuda = 1
 
     # Set up training optimiser + scheduler + loss fcns and training info tracker
-    optimiser = torch.optim.Adam(network.parameters(), lr=args.learn_rate)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimiser, 'min', factor=0.5)
+    optimiser = torch.optim.Adam(network.parameters(), lr=args.learn_rate, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimiser, 'min', factor=0.5, patience=5, verbose=True)
     loss_functions = training.LossWrapper(args.loss_fcns, args.pre_filt)
     train_track = training.TrainTrack()
-    writer = SummaryWriter(os.path.join('runs', model_name))
+    writer = SummaryWriter(os.path.join('runs2', model_name))
 
     # Load dataset
     dataset = dataset.DataSet(data_dir='Data')
@@ -177,7 +177,6 @@ if __name__ == "__main__":
     # the network records the last epoch number, so if training is restarted it will start at the correct epoch number
     for epoch in range(train_track['current_epoch'] + 1, args.epochs + 1):
         ep_st_time = time.time()
-        print('current learning rate: ' + str(optimiser.param_groups[0]['lr']))
 
         # Run 1 epoch of training,
         epoch_loss = network.train_epoch(dataset.subsets['train'].data['input'][0],
@@ -199,9 +198,11 @@ if __name__ == "__main__":
             train_track.val_epoch_update(val_loss.item(), val_ep_st_time, time.time())
             writer.add_scalar('Loss/val', train_track['validation_losses'][-1], epoch)
 
+        print('current learning rate: ' + str(optimiser.param_groups[0]['lr']))
         train_track.train_epoch_update(epoch_loss.item(), ep_st_time, time.time(), init_time, epoch)
         # write loss to the tensorboard (just for recording purposes)
         writer.add_scalar('Loss/train', train_track['training_losses'][-1], epoch)
+        writer.add_scalar('LR/current', optimiser.param_groups[0]['lr'])
         network.save_model('model', save_path)
         miscfuncs.json_save(train_track, 'training_stats', save_path)
 
@@ -209,20 +210,27 @@ if __name__ == "__main__":
             print('validation patience limit reached at epoch ' + str(epoch))
             break
 
+    lossESR = training.ESRLoss()
     test_output, test_loss = network.process_data(dataset.subsets['test'].data['input'][0],
                                      dataset.subsets['test'].data['target'][0], loss_functions, args.test_chunk)
+    test_loss_ESR = lossESR(test_output, dataset.subsets['test'].data['target'][0])
     write(os.path.join(save_path, "test_out_final.wav"), dataset.subsets['test'].fs, test_output.cpu().numpy()[:, 0, 0])
     writer.add_scalar('Loss/test_loss', test_loss.item(), 1)
+    writer.add_scalar('Loss/test_lossESR', test_loss_ESR.item(), 1)
+    train_track['test_loss_final'] = test_loss.item()
+    train_track['test_lossESR_final'] = test_loss_ESR.item()
 
     best_val_net = miscfuncs.json_load('model_best', save_path)
     network = networks.load_model(best_val_net)
     test_output, test_loss = network.process_data(dataset.subsets['test'].data['input'][0],
                                      dataset.subsets['test'].data['target'][0], loss_functions, args.test_chunk)
+    test_loss_ESR = lossESR(test_output, dataset.subsets['test'].data['target'][0])
     write(os.path.join(save_path, "test_out_bestv.wav"),
           dataset.subsets['test'].fs, test_output.cpu().numpy()[:, 0, 0])
     writer.add_scalar('Loss/test_loss', test_loss.item(), 2)
-
-    train_track['test_loss'] = test_loss.item()
+    writer.add_scalar('Loss/test_lossESR', test_loss_ESR.item(), 2)
+    train_track['test_loss_best'] = test_loss.item()
+    train_track['test_lossESR_best'] = test_loss_ESR.item()
     miscfuncs.json_save(train_track, 'training_stats', save_path)
     if cuda:
         with open(os.path.join(save_path, 'maxmemusage.txt'), 'w') as f:
