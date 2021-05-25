@@ -1,4 +1,4 @@
-# AI-Guitar Amplifier Modelling
+# Automated-Guitar Amplifier Modelling
 
 This repository contains neural network training scripts and trained models of guitar amplifiers and distortion pedals. The 'Results' directory contains some example recurrent neural network models trained to emulate the ht-1 amplifier and Big Muff Pi fuzz pedal, these models are described in this [conference paper](https://www.dafx.de/paper-archive/2019/DAFx2019_paper_43.pdf)
 
