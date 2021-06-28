@@ -19,7 +19,7 @@ prsr = argparse.ArgumentParser(
 
 # arguments for the training/test data locations and file names and config loading
 prsr.add_argument('--device', '-p', default='ht1', help='This label describes what device is being modelled')
-prsr.add_argument('--data_location', '-dl', default='..', help='Location of the "Data" directory')
+prsr.add_argument('--data_location', '-dl', default='./Data', help='Location of the "Data" directory')
 prsr.add_argument('--file_name', '-fn', default='ht1',
                   help='The filename of the wav file to be loaded as the input/target data, the script looks for files'
                        'with the filename and the extensions -input.wav and -target.wav ')
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     writer = SummaryWriter(os.path.join('runs2', model_name))
 
     # Load dataset
-    dataset = dataset.DataSet(data_dir='Data')
+    dataset = dataset.DataSet(data_dir=args.data_location)
 
     dataset.create_subset('train', frame_len=22050)
     dataset.load_file(os.path.join('train', args.file_name), 'train')
