@@ -9,7 +9,7 @@ It is possible to use this repository to train your own models. To model a diffe
 
 To create a working local copy of this repository, use the following command:
 
-git clone --recurse-submodules https://github.com/Alec-Wright/NeuralGuitarAmpModelling
+git clone --recurse-submodules https://github.com/Alec-Wright/Automated-GuitarAmpModelling
 
 ### Python Environment
 
